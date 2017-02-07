@@ -55,18 +55,17 @@ class GoogleOAuthController extends ControllerBase {
     $code = filter_input(INPUT_GET, 'code');
 
     if (empty($code) || !$this->client) {
-      return new RedirectResponse('/');
+      return $this->authenticateFailedAction();
     }
 
     try {
       $this->client->authenticate($code);
+      $plus = new Google_Service_Oauth2($this->client);
+      $userinfo = $plus->userinfo->get();
     }
     catch (\Exception $e) {
-      return new RedirectResponse('/');
+      return $this->authenticateFailedAction();
     }
-
-    $plus = new Google_Service_Oauth2($this->client);
-    $userinfo = $plus->userinfo->get();
 
     $user_email = $userinfo['email'];
 
@@ -77,7 +76,7 @@ class GoogleOAuthController extends ControllerBase {
 
       if ($allowed_email_regex) {
         if (!preg_match($allowed_email_regex, $user_email)) {
-          return $this->redirect('user');
+          return $this->authenticateFailedAction();
         }
       }
 
@@ -97,12 +96,20 @@ class GoogleOAuthController extends ControllerBase {
         $user->save();
       }
       catch (\Exception $e) {
-        return new RedirectResponse('/');
+        return $this->authenticateFailedAction();
       }
     }
 
     user_login_finalize($user);
 
-    return $this->redirect('<front>');
+    return $this->authenticateFailedAction();
   }
+
+  /**
+   * Authenticate failed action
+   */
+  protected function authenticateFailedAction($path = '<front>') {
+    return $this->redirect($path);
+  }
+
 }
