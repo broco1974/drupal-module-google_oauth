@@ -15,9 +15,13 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 class GoogleOAuthController extends ControllerBase {
   private $client;
 
+  private $settings;
+
   public function __construct() {
     $private_path = PrivateStream::basePath();
     $config_file = $private_path . '/google-oauth-secret.json';
+
+    $this->settings = \Drupal::config('google_oauth.settings');
 
     if (!is_readable($config_file)) {
       // Nag ?
@@ -51,24 +55,31 @@ class GoogleOAuthController extends ControllerBase {
     $code = filter_input(INPUT_GET, 'code');
 
     if (empty($code) || !$this->client) {
-      return new RedirectResponse('/');
+      return $this->authenticateFailedAction();
     }
 
     try {
       $this->client->authenticate($code);
+      $plus = new Google_Service_Oauth2($this->client);
+      $userinfo = $plus->userinfo->get();
     }
     catch (\Exception $e) {
-      return new RedirectResponse('/');
+      return $this->authenticateFailedAction();
     }
-
-    $plus = new Google_Service_Oauth2($this->client);
-    $userinfo = $plus->userinfo->get();
 
     $user_email = $userinfo['email'];
 
     $user = user_load_by_mail($user_email);
 
     if (!$user) {
+      $allowed_email_regex = $this->settings->get('allowed_email_regex');
+
+      if ($allowed_email_regex) {
+        if (!preg_match($allowed_email_regex, $user_email)) {
+          return $this->authenticateFailedAction();
+        }
+      }
+
       $user_name = $userinfo['name'];
       $user_picture = $userinfo['picture'];
 
@@ -85,12 +96,20 @@ class GoogleOAuthController extends ControllerBase {
         $user->save();
       }
       catch (\Exception $e) {
-        return new RedirectResponse('/');
+        return $this->authenticateFailedAction();
       }
     }
 
     user_login_finalize($user);
 
-    return $this->redirect('<front>');
+    return $this->authenticateFailedAction();
   }
+
+  /**
+   * Authenticate failed action
+   */
+  protected function authenticateFailedAction($path = '<front>') {
+    return $this->redirect($path);
+  }
+
 }
